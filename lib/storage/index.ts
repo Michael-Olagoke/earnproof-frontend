@@ -21,6 +21,8 @@ export interface StorageSchema {
       user: {
         id: string;
         walletAddress: string;
+        walletHash: string;
+        role: string;
         email?: string;
       };
     };
@@ -254,6 +256,12 @@ function migrateLegacyValue<K extends StorageKey>(
         const user = {
           id: legacyValue.user.id,
           walletAddress: legacyValue.user.walletAddress,
+          walletHash: typeof legacyValue.user.walletHash === 'string' 
+            ? legacyValue.user.walletHash 
+            : '',
+          role: typeof legacyValue.user.role === 'string'
+            ? legacyValue.user.role
+            : 'worker',
           ...(typeof legacyValue.user.email === 'string'
             ? { email: legacyValue.user.email }
             : {}),
