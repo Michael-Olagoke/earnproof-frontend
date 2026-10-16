@@ -1,6 +1,7 @@
 export const CREDENTIAL_EXPORT_FILENAME = "earnproof-credential.json";
 export const VERIFICATION_LINK_EXPORT_FILENAME = "earnproof-verification-link.txt";
 export const AUDIT_LOG_EXPORT_FILENAME = "earnproof-audit-log.json";
+export const REDACTED_CREDENTIAL_EXPORT_FILENAME = "earnproof-credential-redacted.json";
 
 const UNSAFE_FILENAME_PATTERN =
   /G[A-Z0-9]{55}|0x[a-fA-F0-9]{8,}|ep[_-][A-Za-z0-9._:-]+|EP-[A-Za-z0-9._:-]+/i;
@@ -120,7 +121,8 @@ export function isSafeExportFilename(filename: string): boolean {
   if (
     filename !== CREDENTIAL_EXPORT_FILENAME &&
     filename !== VERIFICATION_LINK_EXPORT_FILENAME &&
-    filename !== AUDIT_LOG_EXPORT_FILENAME
+    filename !== AUDIT_LOG_EXPORT_FILENAME &&
+    filename !== REDACTED_CREDENTIAL_EXPORT_FILENAME
   ) {
     return false;
   }
@@ -291,6 +293,115 @@ export function buildAuditLogExport(
       : ["id", "actor", "action", "resource", "occurredAt", "entryHash"],
     warnings,
     body: JSON.stringify(rows),
+    mimeType: "application/json",
+  };
+}
+
+/**
+ * Allowlisted metadata-only fields for redacted credential export.
+ * This is a more restricted set than PUBLIC_CREDENTIAL_FIELDS - it excludes
+ * the signature and focuses on metadata that's safe for schema/policy inspection.
+ */
+export const REDACTED_CREDENTIAL_FIELDS = [
+  "id",
+  "type",
+  "schemaVersion",
+  "issuer",
+  "subject.walletHash",
+  "privacy.exactIncomeHidden",
+  "privacy.sourceTransactionsHidden",
+  "issuedAt",
+  "expiresAt",
+  "proof.type",
+  "proof.credentialHash",
+] as const;
+
+export const REDACTED_PROOF_FIELDS = [
+  "id",
+  "type",
+  "schemaVersion",
+  "network",
+  "issuedAt",
+  "expiresAt",
+  "revokedAt",
+] as const;
+
+/**
+ * Build a redacted credential export with only metadata fields.
+ * 
+ * This export format excludes:
+ * - Private claim data (amounts, payment details)
+ * - Signatures
+ * 
+ * It includes only:
+ * - Schema and credential type information
+ * - Metadata timestamps and identifiers
+ * - Proof type and credential hash (not signature)
+ * - Privacy flags
+ * 
+ * The result is suitable for schema inspection, policy analysis, and
+ * metadata verification without exposing sensitive claim details.
+ *
+ * @param input - Credential and optional proof to export
+ * @returns ArtifactExportPlan with redacted metadata only
+ */
+export function buildRedactedCredentialExport(input: {
+  credential?: ExportableCredential;
+  proof?: ExportableProof;
+  rawJson?: string;
+}): ArtifactExportPlan {
+  // Always redact claim data - use only metadata fields
+  const credential = input.credential
+    ? {
+        id: input.credential.id,
+        type: input.credential.type,
+        schemaVersion: input.credential.schemaVersion,
+        issuer: input.credential.issuer,
+        subject: pick(input.credential.subject as Record<string, unknown> | undefined, ["walletHash"]),
+        privacy: pick(input.credential.privacy as Record<string, unknown> | undefined, [
+          "exactIncomeHidden",
+          "sourceTransactionsHidden",
+        ]),
+        issuedAt: input.credential.issuedAt,
+        expiresAt: input.credential.expiresAt,
+        proof: pick(input.credential.proof as Record<string, unknown> | undefined, [
+          "type",
+          "credentialHash", // Hash only, not signature
+        ]),
+      }
+    : undefined;
+
+  const proof = input.proof
+    ? {
+        id: input.proof.id,
+        type: input.proof.type,
+        schemaVersion: input.proof.schemaVersion,
+        network: input.proof.network,
+        issuedAt: input.proof.issuedAt,
+        expiresAt: input.proof.expiresAt,
+        revokedAt: input.proof.revokedAt ?? null,
+      }
+    : undefined;
+
+  const value = { credential, proof };
+  const body = JSON.stringify(value); // Always use fresh serialization for redacted exports
+  const includedFields = [
+    ...(credential ? REDACTED_CREDENTIAL_FIELDS.map((field) => `credential.${field}`) : []),
+    ...(proof ? REDACTED_PROOF_FIELDS.map((field) => `proof.${field}`) : []),
+  ];
+
+  const warnings: DisclosureWarning[] = [
+    {
+      field: "amount",
+      message: "This is a redacted export. All private claims are excluded.",
+    },
+  ];
+
+  return {
+    filename: REDACTED_CREDENTIAL_EXPORT_FILENAME,
+    includedFields,
+    warnings,
+    body,
     mimeType: "application/json",
   };
 }

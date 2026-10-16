@@ -1,7 +1,11 @@
+"use client";
+
 import type { ReactNode } from "react";
+import { useState } from "react";
 import { ArtifactExport } from "@/components/proofs/artifact-export";
 import { Timestamp } from "@/components/common/timestamp";
 import { PrintableProofSummary } from "@/components/verification/printable-proof-summary";
+import { CredentialSchemaInspector } from "@/components/verification/credential-schema-inspector";
 import { appConfig } from "@/config/app";
 import { buildCredentialExport, buildVerificationLinkExport } from "@/lib/credentials/export";
 import {
@@ -84,6 +88,8 @@ export function ResultItem({ label, value }: { label: string; value: ReactNode }
 }
 
 export function VerificationPanel({ result }: { result: VerifyProofResponse | null }) {
+  const [showInspector, setShowInspector] = useState(false);
+
   if (!result) {
     return null;
   }
@@ -96,10 +102,20 @@ export function VerificationPanel({ result }: { result: VerifyProofResponse | nu
           way the screen already does for the /verify/[proofId] page —
           renders when printing. */}
       <div className="print:hidden">
-        <div
-          className={`inline-flex rounded-md border px-3 py-1 text-sm font-semibold uppercase ${statusStyles[result.status]}`}
-        >
-          {result.status}
+        <div className="flex items-center justify-between">
+          <div
+            className={`inline-flex rounded-md border px-3 py-1 text-sm font-semibold uppercase ${statusStyles[result.status]}`}
+          >
+            {result.status}
+          </div>
+          {result.credential && result.proof && (
+            <button
+              onClick={() => setShowInspector(!showInspector)}
+              className="text-xs font-semibold uppercase text-slate-400 hover:text-slate-200 transition-colors"
+            >
+              {showInspector ? "Hide Schema Inspector" : "Show Schema Inspector"}
+            </button>
+          )}
         </div>
 
         {result.credential && result.proof ? (
@@ -154,6 +170,14 @@ export function VerificationPanel({ result }: { result: VerifyProofResponse | nu
                 title="Export verification link"
               />
             </div>
+
+            {/* Schema Inspector - conditionally rendered */}
+            {showInspector && (
+              <CredentialSchemaInspector
+                credential={result.credential}
+                proof={result.proof}
+              />
+            )}
           </>
         ) : (
           <p className="mt-5 text-sm leading-6 text-slate-300">
