@@ -6,6 +6,15 @@
     "routes": ["GET /health"]
   },
   {
+    "module": "lib/deployment/maintenance-status.ts",
+    "schema": "MaintenanceStatusResponse",
+    "required": ["phase", "affectedCapabilities", "timestamp"],
+    "enums": {
+      "phase": ["normal", "draining", "drained", "recovering"]
+    },
+    "routes": ["GET /status/drain"]
+  },
+  {
     "module": "components/proofs/create-proof-flow.tsx",
     "schema": "AuthChallengeResponse",
     "required": ["id", "message", "expiresAt"],

@@ -5,7 +5,9 @@ import { PageHeading } from "@/components/common/page-heading";
 import { PublicShell } from "@/components/layout/public-shell";
 import { StatusCheckSkeleton } from "@/components/common/skeleton/status-check-skeleton";
 import { SupportDiagnosticsExport } from "@/components/common/support-diagnostics-export";
+import { MaintenanceStatusDisplay } from "@/components/status/maintenance-status-display";
 import { useHealthCheck } from "@/lib/health-check";
+import { useMaintenanceStatus } from "@/lib/maintenance";
 import { defineMessages, formatMessage, formatRelativeTime, formatTime } from "@/lib/i18n";
 
 const messages = defineMessages("status", {
@@ -92,6 +94,14 @@ export default function StatusPage() {
     refetch,
   } = useHealthCheck();
 
+  const {
+    data: maintenanceState,
+    loading: maintenanceLoading,
+    isDataLive: maintenanceIsDataLive,
+    lastUpdated: maintenanceLastUpdated,
+    refetch: maintenanceRefetch,
+  } = useMaintenanceStatus();
+
   const showingCachedData = data !== null && !isDataLive;
 
   const isOperational =
@@ -140,6 +150,15 @@ export default function StatusPage() {
     <PublicShell>
       <div className={pageContainer}>
         <PageHeading title={messages.title} description={messages.description} />
+
+        {/* Maintenance/drain status (if active) */}
+        <MaintenanceStatusDisplay
+          state={maintenanceState}
+          isDataLive={maintenanceIsDataLive}
+          lastUpdated={maintenanceLastUpdated}
+          loading={maintenanceLoading}
+          onRefresh={maintenanceRefetch}
+        />
 
         {error && (
           <div className="flex items-center gap-3 rounded-lg border border-amber-300/30 bg-amber-300/10 px-4 py-3">

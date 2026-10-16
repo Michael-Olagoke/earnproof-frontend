@@ -9,6 +9,7 @@
   "servers": [{ "url": "http://localhost:4000/api/v1" }],
   "tags": [
     { "name": "health" },
+    { "name": "status" },
     { "name": "auth" },
     { "name": "payments" },
     { "name": "proofs" },
@@ -27,6 +28,19 @@
             "description": "Health",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HealthResponse" } } }
           }
+        }
+      }
+    },
+    "/status/drain": {
+      "get": {
+        "tags": ["status"],
+        "operationId": "getMaintenanceStatus",
+        "responses": {
+          "200": {
+            "description": "Maintenance/drain status",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MaintenanceStatusResponse" } } }
+          },
+          "503": { "$ref": "#/components/responses/Error" }
         }
       }
     },
@@ -412,6 +426,61 @@
           "service": { "type": "string", "example": "earnproof-api" },
           "database": { "type": "string", "enum": ["ok", "error"], "example": "ok" },
           "timestamp": { "type": "string", "format": "date-time", "example": "2026-08-16T00:00:00.000Z" }
+        }
+      },
+      "MaintenanceStatusResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["phase", "affectedCapabilities", "timestamp"],
+        "properties": {
+          "phase": {
+            "type": "string",
+            "enum": ["normal", "draining", "drained", "recovering"],
+            "example": "normal",
+            "description": "Current deployment maintenance phase"
+          },
+          "affectedCapabilities": {
+            "type": "array",
+            "items": { "type": "string" },
+            "example": [],
+            "description": "List of capability names currently unavailable (e.g. 'proofs:create', 'payments:sync')"
+          },
+          "estimatedCompletionAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "example": null,
+            "description": "ISO 8601 timestamp when server expects to exit maintenance, if available; null or absent if unknown"
+          },
+          "queuedOperations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "type", "enqueuedAt"],
+              "properties": {
+                "id": { "type": "string", "example": "op-123" },
+                "type": { "type": "string", "example": "proof_creation" },
+                "enqueuedAt": { "type": "string", "format": "date-time" }
+              }
+            },
+            "description": "Operations waiting for maintenance to end; omitted or empty if none"
+          },
+          "recoveryProgress": {
+            "type": "object",
+            "required": ["current", "total"],
+            "properties": {
+              "current": { "type": "integer", "example": 0 },
+              "total": { "type": "integer", "example": 10 }
+            },
+            "nullable": true,
+            "description": "Progress during recovery phase; omitted for other phases"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-08-16T00:00:00.000Z",
+            "description": "Server timestamp for stale-detection"
+          }
         }
       },
       "CreateChallengeRequest": {
