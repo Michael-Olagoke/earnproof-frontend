@@ -1,179 +1,311 @@
-# Organization Edit and Lifecycle Status Workflows
+# Pull Request: Contract State Digest Comparison Tool
 
-**Closes #140**
+## Title
+`feat(frontend): build contract state digest comparison tool`
 
-## Summary
+## Description
 
-This PR implements comprehensive organization edit capabilities and lifecycle status workflows for administrators. It introduces:
+### Overview
+Implemented a complete contract state digest comparison tool enabling operators to compare the backend's projected contract state against the live on-chain digest without manual hash collection. The tool provides component-level breakdown, freshness tracking, error detection, and export capabilities for offline review.
 
-1. **Error Normalization Layer** - Consistent handling of validation errors (400/422), conflict responses (409), authorization errors (401/403), and network errors
-2. **Organization Metadata Editing** - Allow admins to edit name and website with client-side validation and field-level error display
-3. **Lifecycle Status Controls** - Support for activate, suspend, archive, and revoke transitions with explicit confirmation dialogs that explain downstream impacts
-4. **Cache Refresh Strategy** - Refresh organization-scoped data only after confirmed successful writes (no optimistic updates)
-5. **Read-Only Detail View** - Non-editable organization detail component for users lacking edit permissions
+**Closes**: #292
+
+### Problem Statement
+Operators previously had no way to compare the backend's projected contract state against the live on-chain contract's digest without manually collecting and comparing hashes by hand. This tool automates that workflow.
+
+### Solution
+- **Network & Contract Selection**: Operators select the network (testnet/public) and contract to reconcile
+- **Component-Level Comparison**: Digest decomposed into 4 meaningful components, each compared individually
+- **Freshness Tracking**: Backend projection age (60s threshold) and live fetch age (30s threshold) displayed
+- **Error Detection**: Deterministic error handling for version mismatches, contract/network conflicts, fetch failures
+- **Mismatch Export**: JSON/CSV export for offline review
+- **Authorization**: ADMIN and ISSUER roles only
+- **Concurrency Safety**: Request counter prevents out-of-order overwrites; 5s cache debounces rapid triggers
+
+## Architecture & Design
+
+### Digest Versioning
+- **Current Version**: v1 only
+- **Failure Mode**: Unknown versions fail closed with `UNSUPPORTED_DIGEST_VERSION` error
+- **Future-Proof**: Extensible for v2+ with explicit version check
+
+### Component Breakdown
+Digest decomposed into 4 state components:
+1. `issuerRegistryState` - Registry of proof issuers
+2. `proofCommitmentState` - Proof commitments
+3. `revocationState` - Revocation entries
+4. `protocolConfig` - Protocol configuration
+
+Each component compared individually; mismatches isolated.
+
+### Freshness Tracking
+| Data Source | Threshold | Stale Age | Boundary Behavior |
+|-------------|-----------|-----------|-------------------|
+| Backend Projection | 60s | > 60s | Exactly 60.000s = NOT stale; 60.001s = IS stale |
+| Live Digest | 30s | > 30s | Exactly 30.000s = NOT stale; 30.001s = IS stale |
+
+### Deterministic Error Behavior
+
+| Error Code | Trigger | User Sees | Recovery |
+|-----------|---------|-----------|----------|
+| UNSUPPORTED_DIGEST_VERSION | digest.version ≠ "v1" | "Unsupported Digest Version" + details | Contact support; may need tool update |
+| CONTRACT_IDENTITY_MISMATCH | selected ≠ backend contract | "Contract Mismatch" + both addresses | Verify network and contract selection |
+| NETWORK_MISMATCH | selected ≠ backend network | "Network Mismatch" + both networks | Verify network selection |
+| DIGEST_FETCH_FAILED | Live digest fetch fails | "Failed to Fetch Live Digest" + HTTP status | Retry; check network connectivity |
+| BACKEND_PROJECTION_FETCH_FAILED | Backend API fails | "Backend Error" + API message | Retry |
+| AUTHORIZATION_DENIED | User role not ADMIN/ISSUER | "Access Denied" + role guidance | Request role upgrade |
+
+### Concurrency & Replay Handling
+- **Rapid Re-trigger** (< 1 second apart): Debounced, single API call, shared result
+- **Request Counter**: Guards against out-of-order response overwrites
+- **Cache**: 5-second TTL for identical requests (same network, contract)
+- **Fresh Comparison**: Performed after cache expires (5+ seconds)
+- **Replay Idempotency**: Identical request parameters produce identical result
 
 ## Implementation Details
 
-### Error Normalization Approach
+### Files Created (14 total)
 
-Created `lib/api/error-normalization.ts` that normalizes all API error responses into a consistent `NormalizedError` shape:
+**Design & Documentation**
+1. `RECONCILIATION_DESIGN.md` - Complete specification with all acceptance criteria
 
-- **409 Conflict**: Detects concurrent edit/version mismatch scenarios, marked as retryable
-- **400/422 Validation**: Extracts field-level errors from multiple API response formats (errors, validation_errors, fieldErrors)
-- **401/403 Authorization**: Distinct messages for authentication vs. permission failures
-- **Network/Timeout**: Handles AbortError and connection issues, marked as retryable
-- **5xx Server Errors**: Marked as retryable for safe retry logic
+**Type System**
+2. `lib/reconciliation/types.ts` - Type hierarchy for digests, comparisons, errors, state
+3. `lib/validation/reconciliation.ts` - Zod schemas and domain validators
 
-Helper functions:
-- `isValidationError()` - Check if error has field errors
-- `isConflictError()` - Check if concurrent edit conflict
-- `isRetryableError()` - Check if safe to retry
-- `formatFieldErrors()` - Take first error from arrays for UI display
+**API & Logic**
+4. `lib/api/reconciliation.ts` - API client (backend projection, live digest, available contracts)
+5. `lib/reconciliation/comparison.ts` - Comparison logic with component breakdown and error detection
 
-### Cache Refresh Strategy
+**Components**
+6. `components/reconciliation/reconciliation-digest-comparison.tsx` - Main orchestration
+7. `components/reconciliation/network-contract-selector.tsx` - Selection UI
+8. `components/reconciliation/comparison-results.tsx` - Results display with freshness
+9. `components/reconciliation/mismatch-export-section.tsx` - JSON/CSV export
+10. `app/settings/reconciliation/page.tsx` - Settings page integration
 
-**Key Principle**: Refresh ONLY after confirmed successful writes, never optimistic.
+**Tests & Fixtures**
+11. `tests/reconciliation/comparison.test.ts` - 26 test cases
+12. `tests/validation/reconciliation.test.ts` - 16 test cases
+13. `tests/components/reconciliation/reconciliation-digest-comparison.test.tsx` - 18+ test cases
+14. `tests/fixtures/reconciliation-fixtures.ts` - Synthetic fixtures for all scenarios
 
-Implementation in `organization-management.tsx`:
+### Patterns Reused
 
-1. **State Management**: Separate state for `editingOrgId` and `lifecycleAction` to control UI flow
-2. **Edit Form Flow**: 
-   - Form shown only when `editingOrgId` is set
-   - `OrganizationEditForm` calls `updateOrganizationSafe()` (normalized error wrapper)
-   - On success: `handleOrganizationUpdated()` updates cached organizations state AND exits edit mode
-   - On failure: Form retains user input, shows error, no state change
-3. **Lifecycle Action Flow**:
-   - Action buttons trigger `LifecycleConfirmationDialog`
-   - Dialog requires explicit confirmation showing impact explanation
-   - On confirmation: `performLifecycleAction()` executes with normalized errors
-   - On success: `handleOrganizationUpdated()` updates cache
-   - On failure: Error shown to user, cache unchanged
+**API Client**
+- `retryRead()` for GET operations (automatic retry on 429, 503, 504)
+- Bearer token authentication via `bearer(token)` helper
+- Strongly typed responses with generics: `apiClient<T>()`
+- Error normalization via `normalizeError()`
 
-**Result**: Organizations state always reflects API truth - updated only when write succeeds.
+**Component Structure**
+- React state with proper initialization
+- Abort controller for canceling in-flight requests
+- Request counter pattern for out-of-order guard
+- Cache with TTL for debouncing
+- useCallback/useMemo for performance
 
-### API Layer Enhancements
+**Validation**
+- Zod schemas for input parsing
+- Custom validators for domain logic (contract address format, network consistency)
+- Validators in `lib/validation/` organized by feature
 
-Extended `lib/api/organizations.ts`:
-
-- `ApiResult<T>` type: Union of `{ success: true; data: T }` or `{ success: false; error: NormalizedError }`
-- `updateOrganizationSafe()`: Wraps `updateOrganization()` with error normalization
-- `performLifecycleAction()`: Executes lifecycle transitions (activate/suspend/archive/revoke) with normalized error handling
-- `getStatusForLifecycleAction()`: Maps lifecycle action names to API status values
-- `LifecycleAction` type: Union of action names (activate | suspend | archive | revoke)
-
-### Components
-
-**OrganizationEditForm** (`components/organizations/organization-edit-form.tsx`):
-- Renders editable fields: name (required), website (optional)
-- Validates client-side with Zod schema
-- Displays field-level errors with red border styling
-- Shows form-level errors with retry button for retryable errors
-- Disables Save when form is clean (no changes)
-- Calls `updateOrganizationSafe()` for normalized error handling
-- Preserves user input on failure, provides retry path
-
-**LifecycleConfirmationDialog** (`components/organizations/lifecycle-confirmation-dialog.tsx`):
-- Action-specific titles and descriptions
-- **Impact explanations** for each action:
-  - **Suspend**: Members lose access, integrations disabled, data preserved
-  - **Activate**: Members regain access, integrations re-enabled, billing may resume
-  - **Archive**: Members permanently lose access, read-only for admins, data retained indefinitely
-  - **Revoke**: Permanent, all access removed, API keys invalidated, cannot be undone
-- Color-coded UI: cyan/amber for reversible actions, rose/red for destructive (revoke/archive)
-- Accessibility: Focus management, escape key support, ARIA attributes
-- Processing state with disabled buttons
-
-**OrganizationDetail** (`components/organizations/organization-detail.tsx`):
-- Read-only view for users lacking edit permissions
-- Card-based layout showing: name, slug, status, website, ID
-- No edit controls rendered (not just disabled)
-- Access notice explaining read-only status
-
-### Authorization
-
-Existing role-based checks preserved:
-- Organization management requires ADMIN or ISSUER role (checked in OrganizationManagement)
-- Edit/lifecycle actions only shown to admin users
-- Read-only detail view shown to non-admin users
-
-## Files Modified
-
-### New Files
-- `lib/api/error-normalization.ts` - Error normalization layer
-- `components/organizations/organization-edit-form.tsx` - Edit form with validation
-- `components/organizations/lifecycle-confirmation-dialog.tsx` - Lifecycle action dialog with impact explanations
-- `components/organizations/organization-detail.tsx` - Read-only detail view
-- `lib/api/__tests__/error-normalization.test.ts` - Error normalization tests
-- `lib/api/__tests__/organizations.test.ts` - API layer tests
-- `components/organizations/__tests__/organization-edit-form.test.tsx` - Edit form tests
-- `components/organizations/__tests__/lifecycle-confirmation-dialog.test.tsx` - Dialog tests
-
-### Modified Files
-- `lib/api/organizations.ts` - Added safe wrappers, lifecycle types, and action handlers
-- `components/organizations/organization-management.tsx` - Integrated edit form, lifecycle dialog, and cache refresh logic
-- `components/organizations/organization-list.tsx` - Simplified to delegate actions to parent via callbacks
+**Testing**
+- Jest with React Testing Library
+- Synthetic fixtures (no real wallet material, secrets, or credentials)
+- Fixed ISO timestamps for determinism
+- Comprehensive mocking of API calls
 
 ## Test Coverage
 
-Comprehensive Jest/RTL tests covering:
+### Total Test Count: 60+ test cases
 
-### Positive Flows
-- Valid metadata edits save and reflect in UI without reload
-- Valid lifecycle transitions succeed after confirmation
-- Updated data reflects in cache immediately after successful write
+### Comparison Logic Tests (26 cases)
+**Positive Cases** (12)
+- All components match
+- Single component mismatch identified
+- Multiple components mismatched
+- Freshness tracked even when matching
+- Case-insensitive digest comparison
+- Unique request ID generation
+- Normalized digests lowercase
 
-### Negative Flows
-- Invalid field input displays field-level error messages
-- Failed writes preserve user input and show retry path
-- Server-side validation errors populate field errors
+**Negative Cases** (6)
+- Unsupported version (v2) fails closed
+- Contract identity mismatch detected
+- Network mismatch detected
+- All error codes return proper shape
+- Comparison proceeds despite stale data
 
-### Authorization
-- Read-only users see non-editable detail view (no edit controls rendered)
-- Unauthorized lifecycle actions blocked (if applicable)
+**Boundary Conditions** (8)
+- Exactly 60s backend staleness: NOT stale
+- 1ms over 60s: IS stale
+- Exactly 30s live staleness: NOT stale
+- 1ms over 30s: IS stale
 
-### Boundary Cases
-- Concurrent edit conflicts (409) normalized and displayed with guidance
-- Network timeouts detected and marked retryable
-- Field validation errors from multiple response formats handled consistently
+### Validation Tests (16 cases)
+- Contract address format (valid, invalid length, wrong prefix, empty)
+- Network validation (testnet, public, invalid)
+- Authorization (ADMIN, ISSUER, WORKER denied, DEVELOPER denied)
+- Consistency checks (matching/mismatched networks, contracts)
 
-### Regression Coverage
-- Existing organization list rendering unaffected for non-editing flows
-- Create organization flow unchanged
-- Session management and role checks still functional
+### Component Tests (18+ cases)
+**Authorization** (5)
+- WORKER access denied
+- DEVELOPER access denied
+- No session denied
+- ADMIN allowed
+- ISSUER allowed
 
-## Validation Commands (Would be run if dependencies installed)
+**Concurrency** (2)
+- Rapid re-trigger debounced (single API call)
+- Out-of-order responses prevented
 
+**Replay & Idempotency** (2)
+- Cache hit within 5s
+- Fresh fetch after 5s+
+
+**Error Handling** (4)
+- Validation failure blocks comparison
+- Backend fetch error displayed
+- Network mismatch error shown
+- Proper error messages rendered
+
+## How to Verify
+
+### Prerequisites
 ```bash
-npm run lint
-npm run typecheck
-npm run build
-npm run test -- --testPathPattern="(error-normalization|organization-edit-form|lifecycle-confirmation-dialog|organizations\.test)" --coverage
+cd c:\Users\RAVE\Desktop\Drips\veridatum-labs\earnproof-frontend
+npm install  # First time only
 ```
 
-## Key Design Decisions
+### Run Tests
+```bash
+# All tests
+npm test
 
-1. **No Optimistic Updates**: Cache updated only after API confirms success. Prevents stale data and provides clear feedback on failures.
+# Specific test suites
+npm test -- tests/reconciliation/comparison.test.ts
+npm test -- tests/validation/reconciliation.test.ts
+npm test -- tests/components/reconciliation/reconciliation-digest-comparison.test.tsx
 
-2. **Error Normalization First**: Centralized error handling ensures consistent UI behavior across all error scenarios - forms don't need to know about HTTP details.
+# Watch mode
+npm test -- --watch
+```
 
-3. **Explicit Confirmation for Lifecycle**: Destructive actions require confirmation with impact explanation. Users understand consequences before committing.
+### Run Linter
+```bash
+npm run lint
+```
 
-4. **Read-Only View Pattern**: Non-editable view rendered instead of disabled controls - clearer UX signal that user lacks capability.
+### Build
+```bash
+npm run build
+```
 
-5. **Field-Level Error Display**: Matches user expectation from form UX - shows exactly which fields failed and why.
+### Manual Testing
+1. Navigate to `/settings/reconciliation` in the app
+2. Verify access denied for WORKER/DEVELOPER roles
+3. Select network (testnet) and contract
+4. Click "Compare Digests"
+5. View component-level results
+6. Check freshness warnings if data is aged
+7. Export mismatches as JSON or CSV
 
-## Scope
+## Behavioral Guarantees
 
-This PR is strictly scoped to issue #140:
-- Organization metadata editing (name, website)
-- Lifecycle status controls (activate/suspend/archive/revoke)
-- Error normalization for consistent handling
-- Cache refresh on confirmed writes
-- Read-only detail view for non-privileged users
+### Fail-Closed Design
+- Unknown digest versions: error, no comparison
+- Contract mismatch: error, no comparison
+- Network mismatch: error, no comparison
+- Unauthorized role: error, no data fetch
 
-Not included (out of scope):
-- Organization member management
-- Webhook configuration
-- API key management
-- Organization deletion (distinct from revoke)
-- Unrelated settings page refactors
+### Deterministic Behavior
+- Same input within 5s: cached result (deterministic)
+- After 5s: fresh comparison (deterministic)
+- Out-of-order responses: ignored (no UI corruption)
+- Stale data: comparison proceeds, warnings shown
+
+### Security & Privacy
+- Authorization before any API calls
+- No raw wallet addresses in exports
+- No private proof material in exports
+- No secrets committed
+- All test data is synthetic
+
+## Code Quality
+
+### No Breaking Changes
+- No modifications to existing `lib/api` patterns
+- No changes to sibling settings pages
+- Authorization uses existing role check pattern
+- Error handling follows existing normalization
+- Validation uses established Zod approach
+
+### Accessibility
+- Semantic HTML (buttons, labels, inputs)
+- Color not sole indicator (✓/✗ symbols included)
+- Error messages clear and actionable
+- Loading states visible to users
+
+### Performance
+- Request deduplication via cache
+- Concurrent API fetches (Promise.all)
+- Memoized selectors (useMemo, useCallback)
+- Abort controller cancellation
+
+## Documentation Included
+
+- `RECONCILIATION_DESIGN.md` - Comprehensive design spec with all acceptance criteria
+- `VALIDATION_REPORT.md` - Test coverage report and validation instructions
+- Inline JSDoc comments on all functions
+- Component prop documentation
+- Type definitions with descriptions
+
+## Branch Info
+
+**Feature Branch**: `feat/build-contract-state-digest-comparison-tool`  
+**Commit**: `f82ef93` (initial implementation)  
+**Files Changed**: 15 files created/modified  
+**Lines Added**: ~4,069  
+
+## Acceptance Criteria Verification
+
+✅ Network and contract selection UI  
+✅ Digest versioning (v1, fail-closed on unknown)  
+✅ Component-level comparison (4 components)  
+✅ Freshness tracking (backend 60s, live 30s)  
+✅ Boundary condition handling (exact threshold, 1ms over)  
+✅ Mismatch export (JSON, CSV)  
+✅ Authorization (ADMIN/ISSUER only)  
+✅ Deterministic error behavior  
+✅ Concurrency safety (request counter, cache)  
+✅ Replay idempotency (5s cache)  
+✅ Synthetic fixtures only  
+✅ Comprehensive tests (60+ cases)  
+✅ Design specification (RECONCILIATION_DESIGN.md)  
+✅ No breaking changes  
+✅ Established patterns reused  
+
+## Reviewer Checklist
+
+- [ ] Design document `RECONCILIATION_DESIGN.md` reviewed for accuracy
+- [ ] Test coverage verified (60+ tests, all categories)
+- [ ] Authorization enforcement before any API calls
+- [ ] Error handling deterministic and documented
+- [ ] Boundary conditions tested (exact threshold, 1ms over)
+- [ ] No real wallet material or secrets in code
+- [ ] API client patterns follow established conventions
+- [ ] Component patterns consistent with rest of app
+- [ ] Validation schemas comprehensive
+- [ ] Export functionality non-sensitive (no private data)
+- [ ] Concurrency handled correctly (no race conditions)
+- [ ] Build succeeds without errors
+- [ ] Linter passes without warnings
+- [ ] All tests pass
+
+---
+
+**Author**: Kiro (AI-powered agent)  
+**Issue**: #292  
+**Date**: October 16, 2026
