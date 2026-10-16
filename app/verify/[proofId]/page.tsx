@@ -8,8 +8,11 @@ import { PublicShell } from "@/components/layout/public-shell";
 import { ProofLifecycleTimeline } from "@/components/proofs/proof-lifecycle-timeline";
 import { Timestamp } from "@/components/common/timestamp";
 import { PrintableProofSummary } from "@/components/verification/printable-proof-summary";
+import { CheckpointInspectionPanel } from "@/components/verification/checkpoint-inspection-panel";
+import { CheckpointFreshnessPanel } from "@/components/verification/checkpoint-freshness-panel";
 import { useProofStatusPolling } from "@/lib/proof-status-polling";
 import { formatDateRange, formatMessage } from "@/lib/i18n";
+import { createCheckpointFetcher, hasCheckpoint } from "@/lib/api/checkpoint-integration";
 import type { VerifyProofResponse } from "@/lib/api/generated/v1";
 
 function ResultItem({ label, value }: { label: string; value: ReactNode }) {
@@ -110,6 +113,7 @@ function VerificationResult({
   isLive: boolean;
 }) {
   const statusStyle = statusStyles[result.status];
+  const checkpointFetcher = createCheckpointFetcher();
 
   return (
     <div className="space-y-6">
@@ -215,6 +219,17 @@ function VerificationResult({
               )}
             </ul>
           </div>
+        )}
+
+        {/* Checkpoint inspection and freshness panels (purely informational context) */}
+        {hasCheckpoint(result.revocationCheckpoint) && (
+          <>
+            <CheckpointInspectionPanel checkpoint={result.revocationCheckpoint} />
+            <CheckpointFreshnessPanel
+              proofCheckpoint={result.revocationCheckpoint}
+              onFetchLiveCheckpoint={checkpointFetcher}
+            />
+          </>
         )}
 
         <div className="flex flex-col sm:flex-row gap-3">

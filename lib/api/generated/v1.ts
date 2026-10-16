@@ -115,6 +115,14 @@ export interface SignedCredential {
 };
 }
 
+export interface Checkpoint {
+  sequence: number;
+  root: string;
+  algorithm: string;
+  ledger: string;
+  observedAt: string;
+}
+
 export interface ProofSummary {
   id: string;
   type: string;
@@ -130,6 +138,7 @@ export interface VerifyProofResponse {
   status: "valid" | "expired" | "revoked" | "unknown" | "invalid";
   credential?: SignedCredential;
   proof?: ProofSummary;
+  revocationCheckpoint?: Checkpoint | null;
 }
 
 export interface ProofCreated {

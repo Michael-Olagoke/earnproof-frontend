@@ -570,6 +570,17 @@
           }
         }
       },
+      "Checkpoint": {
+        "type": "object",
+        "required": ["sequence", "root", "algorithm", "ledger", "observedAt"],
+        "properties": {
+          "sequence": { "type": "integer", "example": 42, "description": "Merkle tree sequence number" },
+          "root": { "type": "string", "example": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5", "description": "Merkle root hash (hex-encoded)" },
+          "algorithm": { "type": "string", "example": "SHA-256", "description": "Hash algorithm used (e.g., SHA-256, KECCAK-256)" },
+          "ledger": { "type": "string", "example": "public", "description": "Chain ledger/block identifier this checkpoint corresponds to" },
+          "observedAt": { "type": "string", "format": "date-time", "example": "2026-10-16T12:00:00Z", "description": "ISO 8601 timestamp when this checkpoint was fetched/recorded" }
+        }
+      },
       "ProofSummary": {
         "type": "object",
         "required": ["id", "type", "schemaVersion", "network", "issuedAt", "expiresAt"],
@@ -593,7 +604,8 @@
           },
           "status": { "type": "string", "enum": ["valid", "expired", "revoked", "unknown", "invalid"] },
           "credential": { "$ref": "#/components/schemas/SignedCredential" },
-          "proof": { "$ref": "#/components/schemas/ProofSummary" }
+          "proof": { "$ref": "#/components/schemas/ProofSummary" },
+          "revocationCheckpoint": { "$ref": "#/components/schemas/Checkpoint", "nullable": true, "description": "Revocation checkpoint that backed this verification result. Present only for proofs that include checkpoint data." }
         }
       },
       "ProofCreated": {
